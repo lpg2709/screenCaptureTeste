@@ -78,13 +78,14 @@ static void logging(const char *fmt, ...){
 int init_screen(){
 	value = 0;
 	options = NULL;
+	pAVFormatContext = NULL;
 	pAVFormatContext = avformat_alloc_context();
 
 	pAVInputFormat = av_find_input_format("x11grab"); // same as the ffmpeg command
-	value = avformat_open_input(&pAVFormatContext, ":0.0+10,250", pAVInputFormat, NULL);
+	value = avformat_open_input(&pAVFormatContext, ":0.0+0,0", pAVInputFormat, NULL);
 
 	if(value != 0){
-		logging("Error, open input device");
+		logging("Error, open input device. %d", value);
 		exit(1);
 	}
 
@@ -129,7 +130,7 @@ int init_screen(){
 int init_output_file(){
 	outAVOutputFormat = NULL;
 	value = 0;
-	output_file = "~/Videos/output.mp4";
+	output_file = "./output.mp4";
 
 	avformat_alloc_output_context2(&outAVFormatContext, NULL, NULL, output_file);
 	if(!outAVFormatContext){
@@ -168,7 +169,7 @@ int init_output_file(){
 	outAVCodecContext->time_base.num = 1;
 	outAVCodecContext->time_base.den = 30; // 15fps
 
-	if(codec_id = AV_CODEC_ID_H264){
+	if(codec_id == AV_CODEC_ID_H264){
 		av_opt_set(outAVCodecContext->priv_data, "preset", "slow", 0);
 	}
 
@@ -191,7 +192,7 @@ int init_output_file(){
 
 	if(!(outAVFormatContext->flags & AVFMT_NOFILE)){
 		if(avio_open2(&outAVFormatContext->pb, output_file, AVIO_FLAG_WRITE, NULL, NULL) < 0){
-			logging("Err, creating the video file");
+			logging("Error, creating the video file");
 			exit(1);
 		}
 	}
@@ -210,12 +211,10 @@ int init_output_file(){
 }
 
 int capture_video_frames(){
-	int flag;
 	int frameFinished;
-	int frame_index = 0;
-
 	value = 0;
 
+	pAVPacket = (AVPacket *)av_malloc(sizeof(AVPacket));
 	av_init_packet(pAVPacket);
 
 	pAVFrame = av_frame_alloc();
@@ -230,9 +229,7 @@ int capture_video_frames(){
 		exit(1);
 	}
 
-	int video_outbuf_size;
 	int nbytes = av_image_get_buffer_size(outAVCodecContext->pix_fmt, outAVCodecContext->width, outAVCodecContext->height, 32);
-
 	uint8_t *video_outbuf = (uint8_t *)av_malloc(nbytes);
 	if(video_outbuf == NULL){
 		logging("Error, allocate memory");
@@ -240,18 +237,21 @@ int capture_video_frames(){
 	}
 
 	value = av_image_fill_arrays(outFrame->data, outFrame->linesize, video_outbuf, AV_PIX_FMT_YUV420P, outAVCodecContext->width, outAVCodecContext->height, 1);
-	if(value = 0){
+	if(value == 0){
 		logging("Error, in filling image array");
 	}
 
 	struct SwsContext *swsCtx_;
 
-	swsCtx_ = sws_getContext(pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt,
+/*	swsCtx_ = sws_getContext(pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt,
 							 outAVCodecContext->width, outAVCodecContext->height, outAVCodecContext->pix_fmt, SWS_BICUBIC, NULL, NULL, NULL);
+*/
+	 swsCtx_ = sws_getContext(pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt, 
+				   outAVCodecContext->width, outAVCodecContext->height, outAVCodecContext->pix_fmt, SWS_BICUBIC, NULL, NULL, NULL);
 
 	int ii = 0;
 	int no_frames = 100;
-	printf("No. of frames to capture: %d", no_frames);
+	logging("No. of frames to capture: %d", no_frames);
 
 	AVPacket outPacket;
 	int j = 0;
@@ -266,20 +266,18 @@ int capture_video_frames(){
 			if(value < 0)
 				logging("Error, unable to decode video");
 			if(frameFinished){// frame decoded
-				sws_scale(swsCtx_, pAVFrame->data, pAVFrame->linesize, 0, pAVCodecContext->height, outFrame->data, outFrame->linesize);
+				sws_scale(swsCtx_, (unsigned char const **)pAVFrame->data, pAVFrame->linesize, 0, pAVCodecContext->height, outFrame->data, outFrame->linesize);
 				av_init_packet(&outPacket);
-				outPacket.data = NULL;
-				outPacket.size = 0;
 
 				avcodec_encode_video2(outAVCodecContext, &outPacket, outFrame, &got_picture);
 
-				if(got_picture){
+				if(!got_picture){
 					if(outPacket.pts != AV_NOPTS_VALUE)
-						outPacket.pts = av_rescale_q(outPacket.pts, video_st->codec->time_base, video_st->time_base);
+						outPacket.pts = av_rescale_q(outPacket.pts, video_st->time_base, video_st->time_base);
 					if(outPacket.dts != AV_NOPTS_VALUE)
-						outPacket.dts = av_rescale_q(outPacket.dts, video_st->codec->time_base, video_st->time_base);
+						outPacket.dts = av_rescale_q(outPacket.dts, video_st->time_base, video_st->time_base);
 
-					printf("Write frame %3d (size= %2d)\n", j++, outPacket.size/1000);
+					printf("Write frame %3d (size= %2d)\n", j++, outPacket.size);
 					if(av_write_frame(outAVFormatContext , &outPacket) != 0){
 						logging("Error, in write video frame");
 					}
@@ -296,7 +294,7 @@ int capture_video_frames(){
 		exit(1);
 	}
 	av_free(video_outbuf);
-
+	return 0;
 }
 
 int free_AV(){
@@ -317,15 +315,21 @@ int free_AV(){
 
 
 int main(){
+	logging("Startup registers...");
+	avdevice_register_all();
+	logging("Registers started\n");
 
-	logging("Startup...");
+	logging("Startup screen...");
 	init_screen();
+	logging("Screen started.\n");
+
 	logging("Startup output file...");
 	init_output_file();
-	logging("Capture screen");
-	capture_video_frames();
+	logging("Output file started\n");
 
-	logging("Program finished");
+	logging("Capture screen...");
+	capture_video_frames();
+	logging("Program finished\n");
 
 	free_AV();
 
