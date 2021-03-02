@@ -5,6 +5,7 @@
 #include <libavutil/frame.h>
 #include <libavutil/mem.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -237,16 +238,14 @@ int capture_video_frames(){
 	}
 
 	value = av_image_fill_arrays(outFrame->data, outFrame->linesize, video_outbuf, AV_PIX_FMT_YUV420P, outAVCodecContext->width, outAVCodecContext->height, 1);
+
 	if(value == 0){
 		logging("Error, in filling image array");
 	}
 
 	struct SwsContext *swsCtx_;
 
-/*	swsCtx_ = sws_getContext(pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt,
-							 outAVCodecContext->width, outAVCodecContext->height, outAVCodecContext->pix_fmt, SWS_BICUBIC, NULL, NULL, NULL);
-*/
-	 swsCtx_ = sws_getContext(pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt, 
+	swsCtx_ = sws_getContext(pAVCodecContext->width, pAVCodecContext->height, pAVCodecContext->pix_fmt, 
 				   outAVCodecContext->width, outAVCodecContext->height, outAVCodecContext->pix_fmt, SWS_BICUBIC, NULL, NULL, NULL);
 
 	int ii = 0;
@@ -269,9 +268,15 @@ int capture_video_frames(){
 				sws_scale(swsCtx_, (unsigned char const **)pAVFrame->data, pAVFrame->linesize, 0, pAVCodecContext->height, outFrame->data, outFrame->linesize);
 				av_init_packet(&outPacket);
 
-				avcodec_encode_video2(outAVCodecContext, &outPacket, outFrame, &got_picture);
+				outPacket.data = NULL;    // packet data will be allocated by the encoder
+				outPacket.size = 0;
 
-				if(!got_picture){
+				if(avcodec_encode_video2(outAVCodecContext, &outPacket, outFrame, &got_picture) < 0){
+					printf("Error, avcodec_encode_video2, video encode failed\n");
+					exit(1);
+				}
+
+				if(got_picture){
 					if(outPacket.pts != AV_NOPTS_VALUE)
 						outPacket.pts = av_rescale_q(outPacket.pts, video_st->time_base, video_st->time_base);
 					if(outPacket.dts != AV_NOPTS_VALUE)
