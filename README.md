@@ -29,3 +29,7 @@ cd ffmpeg
 make
 make install
 ```
+
+## Studies documentations
+
+[https://doc.clickup.com/p/h/23hx2-10/21c992c8e2cbc21](https://doc.clickup.com/p/h/23hx2-10/21c992c8e2cbc21)

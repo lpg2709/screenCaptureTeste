@@ -67,6 +67,7 @@ int codec_id;
 int value;
 int VideoStreamIndx;
 
+// Log function
 static void logging(const char *fmt, ...){
 	va_list args;
 	fprintf(stderr, "LOG: ");
@@ -79,14 +80,23 @@ static void logging(const char *fmt, ...){
 int init_screen(){
 	value = 0;
 	options = NULL;
+	// Format context initi
 	pAVFormatContext = NULL;
 	pAVFormatContext = avformat_alloc_context();
 
+	// Input format, set to recive x11grab
 	pAVInputFormat = av_find_input_format("x11grab"); // same as the ffmpeg command
 	value = avformat_open_input(&pAVFormatContext, ":0.0+0,0", pAVInputFormat, NULL);
 
 	if(value != 0){
 		logging("Error, open input device. %d", value);
+		exit(1);
+	}
+
+	value = av_dict_set(&options, "framerate", "30", 0);
+
+	if(value != 0){
+		logging("Error, setting dictionary values");
 		exit(1);
 	}
 
@@ -115,7 +125,7 @@ int init_screen(){
 	pAVCodecContext = pAVFormatContext->streams[VideoStreamIndx]->codec;
 
 	pAVCodec = avcodec_find_decoder(pAVCodecContext->codec_id);
-	if(pAVCodec == NULL){
+	if(!pAVCodec){
 		logging("Can't find decoder");
 		exit(1);
 	}
@@ -271,8 +281,9 @@ int capture_video_frames(){
 				outPacket.data = NULL;    // packet data will be allocated by the encoder
 				outPacket.size = 0;
 
-				if(avcodec_encode_video2(outAVCodecContext, &outPacket, outFrame, &got_picture) < 0){
-					printf("Error, avcodec_encode_video2, video encode failed\n");
+				value = avcodec_encode_video2(outAVCodecContext, &outPacket, outFrame, &got_picture);
+				if(value < 0){
+					logging("Error, avcodec_encode_video2, video encode failed: \033[1;31m%s\033[0m\n", strerror(value));
 					exit(1);
 				}
 
